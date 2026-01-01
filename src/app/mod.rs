@@ -90,7 +90,8 @@ fn handle_keys(cmd: KeysCommand) -> Result<(), AppError> {
         }
         KeysCommand::Add { label, algorithm } => {
             let algo = hsm::parse_algorithm(&algorithm)?;
-            let key = hsm::generate_asymmetric_key(&client, &label, algo)?;
+            let domains = hsm::auth_key_domains(&client, config.hsm.auth_key_id)?;
+            let key = hsm::generate_asymmetric_key(&client, &label, algo, domains)?;
             println!(
                 "created key {} (label: {}, algorithm: {})",
                 key.id,

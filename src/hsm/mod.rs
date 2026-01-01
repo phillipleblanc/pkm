@@ -83,10 +83,10 @@ pub fn generate_asymmetric_key(
     client: &Client,
     label: &str,
     algorithm: Algorithm,
+    domains: Domain,
 ) -> Result<KeyInfo, AppError> {
     let label = object::Label::from_bytes(label.as_bytes())
         .map_err(|e| AppError::Usage(e.to_string()))?;
-    let domains = Domain::from_bits_truncate(0);
     let capabilities = capabilities_for_algorithm(algorithm);
 
     let key_id = client.generate_asymmetric_key(0, label, domains, capabilities, algorithm)?;

@@ -1,4 +1,4 @@
-Below is a **handoff-ready spec** for a Rust CLI named **`pkm`** (“PKI Manager”) which:
+# PKM: YubiHSM2-backed mTLS certificate manager
 
 * Manages **asymmetric keys on a YubiHSM2**
 * Creates a **root CA cert** signed by a CA key *inside the HSM*
