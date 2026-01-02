@@ -414,6 +414,10 @@ fn capabilities_for_algorithm(algorithm: Algorithm) -> Capability {
 }
 
 fn raw_ecdsa_to_der(raw: &[u8]) -> Result<Vec<u8>, AppError> {
+    if raw.first() == Some(&0x30) {
+        return Ok(raw.to_vec());
+    }
+
     if raw.len() % 2 != 0 {
         return Err(AppError::X509("invalid ECDSA signature length".to_string()));
     }

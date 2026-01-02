@@ -18,7 +18,9 @@ use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::Certificate;
 use yubihsm::{object, Client};
 
-use crate::cli::{CaCommand, Cli, Commands, KeysCommand, TlsAddArgs, TlsCommand, TlsExportArgs};
+use crate::cli::{
+    CaCommand, Cli, Commands, KeysCommand, TlsAddArgs, TlsCommand, TlsExportArgs, TlsExportFormat,
+};
 use crate::{hsm, pki, store};
 use config::{AppConfig, HsmConfig, KeyringConfig};
 use error::AppError;
@@ -141,6 +143,10 @@ fn handle_ca(cmd: CaCommand) -> Result<(), AppError> {
         } => ca_init(&ca_short_name, &key, &common_name, &organizational_unit),
         CaCommand::List => ca_list(),
         CaCommand::Default { ca_short_name } => ca_set_default(&ca_short_name),
+        CaCommand::Export { ca } => {
+            let ca_short_name = resolve_ca_short_name(ca)?;
+            ca_export(&ca_short_name)
+        }
         CaCommand::External(args) => ca_external(args),
     }
 }
@@ -349,6 +355,29 @@ fn ca_list() -> Result<(), AppError> {
     Ok(())
 }
 
+fn ca_export(ca_short_name: &str) -> Result<(), AppError> {
+    let ca_dir = store::ca::ca_dir(&paths::data_dir()?, ca_short_name);
+    let ca_cert_path = store::ca::ca_cert_path(&ca_dir);
+    if !ca_cert_path.exists() {
+        return Err(AppError::Usage(format!(
+            "missing CA cert: {}",
+            ca_cert_path.display()
+        )));
+    }
+
+    let cert_bytes = fs::read(&ca_cert_path)?;
+    let mut output_path = env::current_dir()?;
+    output_path.push("ca.crt");
+    fs::write(&output_path, cert_bytes)?;
+
+    println!(
+        "exported CA cert {} to {}",
+        ca_short_name,
+        output_path.display()
+    );
+    Ok(())
+}
+
 fn ca_set_default(ca_short_name: &str) -> Result<(), AppError> {
     let data_dir = paths::data_dir()?;
     let ca_dir = store::ca::ca_dir(&data_dir, ca_short_name);
@@ -445,67 +474,88 @@ fn ca_tls_export(ca_short_name: &str, args: TlsExportArgs) -> Result<(), AppErro
         )));
     }
 
-    if !ca_cert_path.exists() {
-        return Err(AppError::Usage(format!(
-            "missing CA cert: {}",
-            ca_cert_path.display()
-        )));
-    }
-
-    let bundle_password = rpassword::prompt_password("PKCS12 password: ")?;
-    if bundle_password.is_empty() {
-        return Err(AppError::Usage("password cannot be empty".to_string()));
-    }
-
     let key_pem = read_tls_private_key_pem(&client, wrap_key_id, &key_path)?;
-    let temp_key = TempKeyFile::new("pkm-tls", &key_pem)?;
-
-    let mut output_path = env::current_dir()?;
-    output_path.push(format!("{}.p12", args.name));
-
-    let output = Command::new("openssl")
-        .arg("pkcs12")
-        .arg("-export")
-        .arg("-inkey")
-        .arg(temp_key.path())
-        .arg("-in")
-        .arg(&cert_path)
-        .arg("-certfile")
-        .arg(&ca_cert_path)
-        .arg("-name")
-        .arg(&args.name)
-        .arg("-out")
-        .arg(&output_path)
-        .arg("-passout")
-        .arg("env:PKM_P12_PASS")
-        .env("PKM_P12_PASS", &bundle_password)
-        .output()
-        .map_err(|err| {
-            if err.kind() == io::ErrorKind::NotFound {
-                AppError::Usage("openssl not found in PATH".to_string())
-            } else {
-                AppError::Io(err)
+    match args.format {
+        TlsExportFormat::Pkcs12 => {
+            if !ca_cert_path.exists() {
+                return Err(AppError::Usage(format!(
+                    "missing CA cert: {}",
+                    ca_cert_path.display()
+                )));
             }
-        })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let detail = if !stderr.trim().is_empty() {
-            stderr.trim()
-        } else if !stdout.trim().is_empty() {
-            stdout.trim()
-        } else {
-            "unknown error"
-        };
+            let bundle_password = rpassword::prompt_password("PKCS12 password: ")?;
+            if bundle_password.is_empty() {
+                return Err(AppError::Usage("password cannot be empty".to_string()));
+            }
 
-        return Err(AppError::Usage(format!(
-            "openssl pkcs12 export failed: {}",
-            detail
-        )));
+            let temp_key = TempKeyFile::new("pkm-tls", &key_pem)?;
+
+            let mut output_path = env::current_dir()?;
+            output_path.push(format!("{}.p12", args.name));
+
+            let output = Command::new("openssl")
+                .arg("pkcs12")
+                .arg("-export")
+                .arg("-inkey")
+                .arg(temp_key.path())
+                .arg("-in")
+                .arg(&cert_path)
+                .arg("-certfile")
+                .arg(&ca_cert_path)
+                .arg("-name")
+                .arg(&args.name)
+                .arg("-out")
+                .arg(&output_path)
+                .arg("-passout")
+                .arg("env:PKM_P12_PASS")
+                .env("PKM_P12_PASS", &bundle_password)
+                .output()
+                .map_err(|err| {
+                    if err.kind() == io::ErrorKind::NotFound {
+                        AppError::Usage("openssl not found in PATH".to_string())
+                    } else {
+                        AppError::Io(err)
+                    }
+                })?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let detail = if !stderr.trim().is_empty() {
+                    stderr.trim()
+                } else if !stdout.trim().is_empty() {
+                    stdout.trim()
+                } else {
+                    "unknown error"
+                };
+
+                return Err(AppError::Usage(format!(
+                    "openssl pkcs12 export failed: {}",
+                    detail
+                )));
+            }
+
+            println!("exported {} to {}", args.name, output_path.display());
+        }
+        TlsExportFormat::Split => {
+            let cert_bytes = fs::read(&cert_path)?;
+            let mut output_key_path = env::current_dir()?;
+            output_key_path.push(format!("{}.pem", args.name));
+            let mut output_cert_path = env::current_dir()?;
+            output_cert_path.push(format!("{}.crt", args.name));
+
+            write_sensitive_file(&output_key_path, &key_pem)?;
+            fs::write(&output_cert_path, cert_bytes)?;
+
+            println!(
+                "exported {} to {} and {}",
+                args.name,
+                output_key_path.display(),
+                output_cert_path.display()
+            );
+        }
     }
-
-    println!("exported {} to {}", args.name, output_path.display());
     Ok(())
 }
 
@@ -779,6 +829,21 @@ impl TempKeyFile {
     fn path(&self) -> &Path {
         &self.path
     }
+}
+
+fn write_sensitive_file(path: &Path, contents: &[u8]) -> Result<(), AppError> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+
+    let mut file = options.open(path)?;
+    file.write_all(contents)?;
+    Ok(())
 }
 
 impl Drop for TempKeyFile {

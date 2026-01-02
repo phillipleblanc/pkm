@@ -277,6 +277,18 @@ Set the default CA used by `pkm tls add` and `pkm tls export` when `--ca` is not
 
 ---
 
+### `pkm ca export --ca <ca-short-name>`
+
+Export a CA certificate into the current working directory:
+
+* `$CWD/ca.crt`
+
+**Behavior**
+
+* Uses the default CA selection rules if `--ca` is not provided.
+
+---
+
 ### `pkm ca init <ca-short-name> --key <id-or-label> --common-name <cn> --organizational-unit <ou>`
 
 Creates:
@@ -387,15 +399,16 @@ Creates a leaf private key (filesystem) and signed certificate (by CA key in HSM
 
 ### `pkm tls export <name> --ca <ca-short-name>`
 
-Exports a PKCS#12 bundle for a leaf certificate into the current working directory:
+Exports a leaf certificate into the current working directory:
 
-* `$CWD/<name>.p12` (PKCS#12 bundle)
+* `--format pkcs12` (default): `$CWD/<name>.p12` (PKCS#12 bundle)
+* `--format split`: `$CWD/<name>.crt` and `$CWD/<name>.pem` (separate cert + key)
 
 **Behavior**
 
-* Prompts for a bundle password.
-* Uses `<ca>/tls/<name>.pem`, `<ca>/tls/<name>.crt`, and `<ca>/ca.crt`.
-* Requires `openssl` in `PATH`.
+* For `--format pkcs12`, prompts for a bundle password.
+* Uses `<ca>/tls/<name>.pem` and `<ca>/tls/<name>.crt` (plus `<ca>/ca.crt` for `--format pkcs12`).
+* Requires `openssl` in `PATH` for `--format pkcs12`.
 * CA selection uses the same rules as `pkm tls add`.
 
 ---

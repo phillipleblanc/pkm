@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(name = "pkm", version, about = "PKI Manager for YubiHSM2")]
@@ -83,6 +83,12 @@ pub enum CaCommand {
         ca_short_name: String,
     },
 
+    /// Export the CA certificate
+    Export {
+        #[arg(long = "ca")]
+        ca: Option<String>,
+    },
+
     /// External subcommand handler for `pkm ca <name> ...`
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -99,7 +105,7 @@ pub enum TlsCommand {
         args: TlsAddArgs,
     },
 
-    /// Export a TLS certificate as PKCS#12
+    /// Export a TLS certificate
     Export {
         #[arg(long = "ca")]
         ca: Option<String>,
@@ -132,4 +138,13 @@ pub struct TlsAddArgs {
 #[derive(Parser, Debug)]
 pub struct TlsExportArgs {
     pub name: String,
+
+    #[arg(long, value_enum, default_value_t = TlsExportFormat::Pkcs12)]
+    pub format: TlsExportFormat,
+}
+
+#[derive(ValueEnum, Debug, Clone, Copy)]
+pub enum TlsExportFormat {
+    Pkcs12,
+    Split,
 }

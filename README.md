@@ -45,11 +45,17 @@ pkm ca init home --key <hsm-key-id-or-label> \
 # Set default CA (optional)
 pkm ca default home
 
+# Export CA certificate (defaults to current CA)
+pkm ca export
+
 # Issue a TLS certificate
 pkm tls add server1 --server --host my-server.com --host 10.0.0.10
 
-# Export as PKCS#12
+# Export as PKCS#12 (default)
 pkm tls export server1
+
+# Export as split .crt/.pem
+pkm tls export server1 --format split
 
 # List leaf certs
 pkm tls list
