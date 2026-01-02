@@ -3,7 +3,8 @@ use std::str::FromStr;
 use sha2::{Digest, Sha256, Sha384};
 use yubihsm::asymmetric::Algorithm;
 use yubihsm::connector::usb::{UsbConfig, UsbConnector};
-use yubihsm::{object, wrap, Capability, Client, Credentials, Domain};
+use yubihsm::{authentication, hmac, otp};
+use yubihsm::{object, wrap, Algorithm as HsmAlgorithm, Capability, Client, Credentials, Domain};
 
 use crate::app::config::AppConfig;
 use crate::app::error::AppError;
@@ -13,6 +14,14 @@ pub struct KeyInfo {
     pub id: u16,
     pub label: String,
     pub algorithm: Algorithm,
+}
+
+#[derive(Debug, Clone)]
+pub struct KeyListEntry {
+    pub id: u16,
+    pub label: String,
+    pub object_type: object::Type,
+    pub algorithm: HsmAlgorithm,
 }
 
 pub const TLS_WRAP_KEY_LABEL: &str = "pkm-tls-wrap";
@@ -52,6 +61,33 @@ pub fn list_asymmetric_keys(client: &Client) -> Result<Vec<KeyInfo>, AppError> {
     }
 
     keys.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(keys)
+}
+
+pub fn list_keys(client: &Client) -> Result<Vec<KeyListEntry>, AppError> {
+    let key_types = [
+        object::Type::AsymmetricKey,
+        object::Type::AuthenticationKey,
+        object::Type::WrapKey,
+        object::Type::HmacKey,
+        object::Type::OtpAeadKey,
+    ];
+    let mut keys = Vec::new();
+
+    for key_type in key_types {
+        let entries = client.list_objects(&[object::Filter::Type(key_type)])?;
+        for entry in entries {
+            let info = client.get_object_info(entry.object_id, entry.object_type)?;
+            keys.push(KeyListEntry {
+                id: info.object_id,
+                label: info.label.to_string(),
+                object_type: info.object_type,
+                algorithm: info.algorithm,
+            });
+        }
+    }
+
+    keys.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.object_type.cmp(&b.object_type)));
     Ok(keys)
 }
 
@@ -225,6 +261,38 @@ pub fn algorithm_name(algorithm: Algorithm) -> &'static str {
         Algorithm::EcBp256 => "ecbp256",
         Algorithm::EcBp384 => "ecbp384",
         Algorithm::EcBp512 => "ecbp512",
+    }
+}
+
+pub fn algorithm_display(algorithm: HsmAlgorithm) -> String {
+    match algorithm {
+        HsmAlgorithm::Asymmetric(alg) => algorithm_name(alg).to_string(),
+        HsmAlgorithm::Authentication(authentication::Algorithm::YubicoAes) => {
+            "yubico-aes".to_string()
+        }
+        HsmAlgorithm::Wrap(wrap::Algorithm::Aes128Ccm) => "aes128-ccm".to_string(),
+        HsmAlgorithm::Wrap(wrap::Algorithm::Aes192Ccm) => "aes192-ccm".to_string(),
+        HsmAlgorithm::Wrap(wrap::Algorithm::Aes256Ccm) => "aes256-ccm".to_string(),
+        HsmAlgorithm::Hmac(hmac::Algorithm::Sha1) => "hmac-sha1".to_string(),
+        HsmAlgorithm::Hmac(hmac::Algorithm::Sha256) => "hmac-sha256".to_string(),
+        HsmAlgorithm::Hmac(hmac::Algorithm::Sha384) => "hmac-sha384".to_string(),
+        HsmAlgorithm::Hmac(hmac::Algorithm::Sha512) => "hmac-sha512".to_string(),
+        HsmAlgorithm::YubicoOtp(otp::Algorithm::Aes128) => "otp-aes128".to_string(),
+        HsmAlgorithm::YubicoOtp(otp::Algorithm::Aes192) => "otp-aes192".to_string(),
+        HsmAlgorithm::YubicoOtp(otp::Algorithm::Aes256) => "otp-aes256".to_string(),
+        other => format!("{:?}", other),
+    }
+}
+
+pub fn object_type_name(object_type: object::Type) -> &'static str {
+    match object_type {
+        object::Type::AuthenticationKey => "authentication-key",
+        object::Type::AsymmetricKey => "asymmetric-key",
+        object::Type::WrapKey => "wrap-key",
+        object::Type::HmacKey => "hmac-key",
+        object::Type::OtpAeadKey => "otp-aead-key",
+        object::Type::Opaque => "opaque",
+        object::Type::Template => "template",
     }
 }
 

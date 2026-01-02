@@ -209,15 +209,16 @@ signature = "ecdsa-p256-sha256"
 
 ### `pkm keys list`
 
-List asymmetric keys on the device, pretty-format:
+List keys on the device, pretty-format:
 
 * object id
 * label
+* type
 * algorithm
 
 **Implementation details**
 
-* Query HSM for objects of type “asymmetric key”
+* Query HSM for key objects (asymmetric, authentication, wrap, HMAC, OTP AEAD)
 * Display table view (column aligned)
 
 ---

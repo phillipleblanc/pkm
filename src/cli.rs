@@ -12,7 +12,7 @@ pub enum Commands {
     /// Initialize configuration and keyring entry
     Init,
 
-    /// Manage asymmetric keys on the HSM
+    /// Manage keys on the HSM
     Keys {
         #[command(subcommand)]
         command: KeysCommand,
@@ -33,7 +33,7 @@ pub enum Commands {
 
 #[derive(Subcommand)]
 pub enum KeysCommand {
-    /// List asymmetric keys
+    /// List keys
     List,
 
     /// Create a new asymmetric key

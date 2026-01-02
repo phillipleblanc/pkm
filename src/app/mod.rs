@@ -84,7 +84,7 @@ fn handle_keys(cmd: KeysCommand) -> Result<(), AppError> {
 
     match cmd {
         KeysCommand::List => {
-            let keys = hsm::list_asymmetric_keys(&client)?;
+            let keys = hsm::list_keys(&client)?;
             print_keys_table(&keys);
             Ok(())
         }
@@ -824,35 +824,50 @@ fn prompt_yes_no(question: &str) -> Result<bool, AppError> {
     Ok(answer == "y" || answer == "yes")
 }
 
-fn print_keys_table(keys: &[hsm::KeyInfo]) {
-    let headers = ["ID", "Label", "Algorithm"];
-    let mut widths = [headers[0].len(), headers[1].len(), headers[2].len()];
+fn print_keys_table(keys: &[hsm::KeyListEntry]) {
+    let headers = ["ID", "Label", "Type", "Algorithm"];
+    let mut widths = [
+        headers[0].len(),
+        headers[1].len(),
+        headers[2].len(),
+        headers[3].len(),
+    ];
+    let mut rows = Vec::with_capacity(keys.len());
 
     for key in keys {
+        let type_name = hsm::object_type_name(key.object_type);
+        let algorithm = hsm::algorithm_display(key.algorithm);
+
         widths[0] = widths[0].max(key.id.to_string().len());
         widths[1] = widths[1].max(key.label.len());
-        widths[2] = widths[2].max(hsm::algorithm_name(key.algorithm).len());
+        widths[2] = widths[2].max(type_name.len());
+        widths[3] = widths[3].max(algorithm.len());
+        rows.push((key.id, key.label.as_str(), type_name, algorithm));
     }
 
     println!(
-        "{:<idw$}  {:<lw$}  {:<aw$}",
+        "{:<idw$}  {:<lw$}  {:<tw$}  {:<aw$}",
         headers[0],
         headers[1],
         headers[2],
+        headers[3],
         idw = widths[0],
         lw = widths[1],
-        aw = widths[2]
+        tw = widths[2],
+        aw = widths[3]
     );
 
-    for key in keys {
+    for (id, label, type_name, algorithm) in rows {
         println!(
-            "{:<idw$}  {:<lw$}  {:<aw$}",
-            key.id,
-            key.label,
-            hsm::algorithm_name(key.algorithm),
+            "{:<idw$}  {:<lw$}  {:<tw$}  {:<aw$}",
+            id,
+            label,
+            type_name,
+            algorithm,
             idw = widths[0],
             lw = widths[1],
-            aw = widths[2]
+            tw = widths[2],
+            aw = widths[3]
         );
     }
 }

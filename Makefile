@@ -7,6 +7,10 @@ VENDOR_TARBALL := $(RPM_TOPDIR)/SOURCES/$(NAME)-$(VERSION)-vendor.tar.gz
 TAR_EXCLUDES := --exclude-vcs --exclude=.jj --exclude=target --exclude=vendor --exclude=rpmbuild --exclude=copr-logs*
 COPR_REPO ?= phillipleblanc/pkm
 
+all:
+	cargo build --release
+	cp target/release/$(NAME) $(HOME)/.local/bin/$(NAME)
+
 .PHONY: srpm
 srpm:
 	mkdir -p $(RPM_TOPDIR)/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
