@@ -34,7 +34,10 @@ pub enum Commands {
 #[derive(Subcommand)]
 pub enum KeysCommand {
     /// List keys
-    List,
+    List {
+        #[arg(long = "all-capabilities")]
+        all_capabilities: bool,
+    },
 
     /// Create a new asymmetric key
     Add {

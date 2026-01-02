@@ -83,9 +83,9 @@ fn handle_keys(cmd: KeysCommand) -> Result<(), AppError> {
     let client = hsm::connect_usb(&config, &password)?;
 
     match cmd {
-        KeysCommand::List => {
+        KeysCommand::List { all_capabilities } => {
             let keys = hsm::list_keys(&client)?;
-            print_keys_table(&keys);
+            print_keys_table(&keys, all_capabilities);
             Ok(())
         }
         KeysCommand::Add { label, algorithm } => {
@@ -824,50 +824,75 @@ fn prompt_yes_no(question: &str) -> Result<bool, AppError> {
     Ok(answer == "y" || answer == "yes")
 }
 
-fn print_keys_table(keys: &[hsm::KeyListEntry]) {
-    let headers = ["ID", "Label", "Type", "Algorithm"];
+fn print_keys_table(keys: &[hsm::KeyListEntry], all_capabilities: bool) {
+    struct Row<'a> {
+        id: u16,
+        label: &'a str,
+        type_name: &'static str,
+        algorithm: String,
+        capabilities: String,
+    }
+
+    let headers = ["ID", "Label", "Type", "Algorithm", "Capabilities"];
     let mut widths = [
         headers[0].len(),
         headers[1].len(),
         headers[2].len(),
         headers[3].len(),
+        headers[4].len(),
     ];
     let mut rows = Vec::with_capacity(keys.len());
 
     for key in keys {
         let type_name = hsm::object_type_name(key.object_type);
         let algorithm = hsm::algorithm_display(key.algorithm);
+        let capabilities = if all_capabilities {
+            hsm::capabilities_display(key.capabilities)
+        } else {
+            hsm::capabilities_display_limited(key.capabilities, 3)
+        };
 
         widths[0] = widths[0].max(key.id.to_string().len());
         widths[1] = widths[1].max(key.label.len());
         widths[2] = widths[2].max(type_name.len());
         widths[3] = widths[3].max(algorithm.len());
-        rows.push((key.id, key.label.as_str(), type_name, algorithm));
+        widths[4] = widths[4].max(capabilities.len());
+        rows.push(Row {
+            id: key.id,
+            label: key.label.as_str(),
+            type_name,
+            algorithm,
+            capabilities,
+        });
     }
 
     println!(
-        "{:<idw$}  {:<lw$}  {:<tw$}  {:<aw$}",
+        "{:<idw$}  {:<lw$}  {:<tw$}  {:<aw$}  {:<cw$}",
         headers[0],
         headers[1],
         headers[2],
         headers[3],
+        headers[4],
         idw = widths[0],
         lw = widths[1],
         tw = widths[2],
-        aw = widths[3]
+        aw = widths[3],
+        cw = widths[4]
     );
 
-    for (id, label, type_name, algorithm) in rows {
+    for row in rows {
         println!(
-            "{:<idw$}  {:<lw$}  {:<tw$}  {:<aw$}",
-            id,
-            label,
-            type_name,
-            algorithm,
+            "{:<idw$}  {:<lw$}  {:<tw$}  {:<aw$}  {:<cw$}",
+            row.id,
+            row.label,
+            row.type_name,
+            row.algorithm,
+            row.capabilities,
             idw = widths[0],
             lw = widths[1],
             tw = widths[2],
-            aw = widths[3]
+            aw = widths[3],
+            cw = widths[4]
         );
     }
 }

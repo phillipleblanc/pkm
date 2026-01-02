@@ -215,6 +215,8 @@ List keys on the device, pretty-format:
 * label
 * type
 * algorithm
+* capabilities
+* when capabilities exceed 3, show the first 3 and append ", N more..." (use `--all-capabilities` to show all)
 
 **Implementation details**
 

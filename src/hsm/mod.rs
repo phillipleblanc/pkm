@@ -22,6 +22,7 @@ pub struct KeyListEntry {
     pub label: String,
     pub object_type: object::Type,
     pub algorithm: HsmAlgorithm,
+    pub capabilities: Capability,
 }
 
 pub const TLS_WRAP_KEY_LABEL: &str = "pkm-tls-wrap";
@@ -83,6 +84,7 @@ pub fn list_keys(client: &Client) -> Result<Vec<KeyListEntry>, AppError> {
                 label: info.label.to_string(),
                 object_type: info.object_type,
                 algorithm: info.algorithm,
+                capabilities: info.capabilities,
             });
         }
     }
@@ -282,6 +284,113 @@ pub fn algorithm_display(algorithm: HsmAlgorithm) -> String {
         HsmAlgorithm::YubicoOtp(otp::Algorithm::Aes256) => "otp-aes256".to_string(),
         other => format!("{:?}", other),
     }
+}
+
+pub fn capabilities_display(capabilities: Capability) -> String {
+    let names = capabilities_list(capabilities);
+    if names.is_empty() {
+        "-".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
+pub fn capabilities_display_limited(capabilities: Capability, max: usize) -> String {
+    let names = capabilities_list(capabilities);
+    if names.is_empty() {
+        return "-".to_string();
+    }
+
+    if names.len() <= max {
+        return names.join(", ");
+    }
+
+    let mut output = names[..max].join(", ");
+    output.push_str(&format!(", {} more...", names.len() - max));
+    output
+}
+
+pub fn capabilities_list(capabilities: Capability) -> Vec<String> {
+    if capabilities.is_empty() {
+        return Vec::new();
+    }
+
+    let known = [
+        (Capability::DERIVE_ECDH, "derive-ecdh"),
+        (Capability::DECRYPT_OAEP, "decrypt-oaep"),
+        (Capability::DECRYPT_PKCS, "decrypt-pkcs"),
+        (Capability::GENERATE_ASYMMETRIC_KEY, "generate-asymmetric-key"),
+        (Capability::SIGN_ECDSA, "sign-ecdsa"),
+        (Capability::SIGN_EDDSA, "sign-eddsa"),
+        (Capability::SIGN_PKCS, "sign-pkcs"),
+        (Capability::SIGN_PSS, "sign-pss"),
+        (
+            Capability::SIGN_ATTESTATION_CERTIFICATE,
+            "sign-attestation-certificate",
+        ),
+        (Capability::GET_LOG_ENTRIES, "get-log-entries"),
+        (Capability::DELETE_ASYMMETRIC_KEY, "delete-asymmetric-key"),
+        (
+            Capability::DELETE_AUTHENTICATION_KEY,
+            "delete-authentication-key",
+        ),
+        (Capability::DELETE_HMAC_KEY, "delete-hmac-key"),
+        (Capability::DELETE_OPAQUE, "delete-opaque"),
+        (Capability::DELETE_OTP_AEAD_KEY, "delete-otp-aead-key"),
+        (Capability::DELETE_TEMPLATE, "delete-template"),
+        (Capability::DELETE_WRAP_KEY, "delete-wrap-key"),
+        (Capability::EXPORTABLE_UNDER_WRAP, "exportable-under-wrap"),
+        (Capability::EXPORT_WRAPPED, "export-wrapped"),
+        (Capability::GENERATE_OTP_AEAD_KEY, "generate-otp-aead-key"),
+        (Capability::GENERATE_WRAP_KEY, "generate-wrap-key"),
+        (Capability::GET_OPAQUE, "get-opaque"),
+        (Capability::GET_OPTION, "get-option"),
+        (Capability::GET_PSEUDO_RANDOM, "get-pseudo-random"),
+        (Capability::GET_TEMPLATE, "get-template"),
+        (Capability::GENERATE_HMAC_KEY, "generate-hmac-key"),
+        (Capability::SIGN_HMAC, "sign-hmac"),
+        (Capability::VERIFY_HMAC, "verify-hmac"),
+        (Capability::IMPORT_WRAPPED, "import-wrapped"),
+        (Capability::CREATE_OTP_AEAD, "create-otp-aead"),
+        (Capability::RANDOMIZE_OTP_AEAD, "randomize-otp-aead"),
+        (
+            Capability::REWRAP_FROM_OTP_AEAD_KEY,
+            "rewrap-from-otp-aead-key",
+        ),
+        (
+            Capability::REWRAP_TO_OTP_AEAD_KEY,
+            "rewrap-to-otp-aead-key",
+        ),
+        (Capability::DECRYPT_OTP, "decrypt-otp"),
+        (Capability::PUT_ASYMMETRIC_KEY, "put-asymmetric-key"),
+        (Capability::PUT_AUTHENTICATION_KEY, "put-authentication-key"),
+        (Capability::PUT_HMAC_KEY, "put-hmac-key"),
+        (Capability::PUT_OPAQUE, "put-opaque"),
+        (Capability::PUT_OPTION, "set-option"),
+        (Capability::PUT_OTP_AEAD_KEY, "put-otp-aead-key"),
+        (Capability::PUT_TEMPLATE, "put-template"),
+        (Capability::PUT_WRAP_KEY, "put-wrap-key"),
+        (Capability::RESET_DEVICE, "reset-device"),
+        (Capability::SIGN_SSH_CERTIFICATE, "sign-ssh-certificate"),
+        (Capability::UNWRAP_DATA, "unwrap-data"),
+        (Capability::WRAP_DATA, "wrap-data"),
+        (Capability::CHANGE_AUTHENTICATION_KEY, "change-authentication-key"),
+    ];
+
+    let mut remaining = capabilities;
+    let mut names = Vec::new();
+    for (flag, name) in known {
+        if remaining.contains(flag) {
+            names.push(name.to_string());
+            remaining.remove(flag);
+        }
+    }
+
+    if !remaining.is_empty() {
+        names.push(format!("unknown(0x{:x})", remaining.bits()));
+    }
+
+    names
 }
 
 pub fn object_type_name(object_type: object::Type) -> &'static str {
