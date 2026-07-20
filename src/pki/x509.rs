@@ -60,6 +60,58 @@ where
     sign_certificate(tbs, signature_alg, sign_fn)
 }
 
+/// Build a subordinate (intermediate) CA certificate from a CSR. The subject
+/// and public key come from the CSR; the issuer, AKI, and signature come from
+/// the issuing CA.
+pub fn build_ca_from_csr<F>(
+    subject: Name,
+    issuer: Name,
+    serial: SerialNumber,
+    validity: Validity,
+    subject_spki: spki::SubjectPublicKeyInfoOwned,
+    issuer_spki: spki::SubjectPublicKeyInfoOwned,
+    path_len: u8,
+    signature_alg: spki::AlgorithmIdentifierOwned,
+    sign_fn: F,
+) -> Result<Certificate, AppError>
+where
+    F: Fn(&[u8]) -> Result<Vec<u8>, AppError>,
+{
+    let ski = SubjectKeyIdentifier(key_identifier_from_spki(&subject_spki)?);
+    let aki = AuthorityKeyIdentifier {
+        key_identifier: Some(key_identifier_from_spki(&issuer_spki)?),
+        authority_cert_issuer: None,
+        authority_cert_serial_number: None,
+    };
+
+    let key_usage = KeyUsage((KeyUsages::KeyCertSign | KeyUsages::CRLSign).into());
+    let basic_constraints = BasicConstraints {
+        ca: true,
+        path_len_constraint: Some(path_len),
+    };
+
+    let mut extensions = Extensions::new();
+    extensions.push(basic_constraints.to_extension(&subject, &extensions)?);
+    extensions.push(key_usage.to_extension(&subject, &extensions)?);
+    extensions.push(ski.to_extension(&subject, &extensions)?);
+    extensions.push(aki.to_extension(&subject, &extensions)?);
+
+    let tbs = TbsCertificate {
+        version: Version::V3,
+        serial_number: serial,
+        signature: signature_alg.clone(),
+        issuer,
+        validity,
+        subject,
+        subject_public_key_info: subject_spki,
+        issuer_unique_id: None,
+        subject_unique_id: None,
+        extensions: Some(extensions),
+    };
+
+    sign_certificate(tbs, signature_alg, sign_fn)
+}
+
 pub fn build_leaf_cert<F>(
     subject: Name,
     issuer: Name,

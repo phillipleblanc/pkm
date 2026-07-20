@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
@@ -87,6 +89,28 @@ pub enum CaCommand {
     Export {
         #[arg(long = "ca")]
         ca: Option<String>,
+    },
+
+    /// Sign a CSR as a subordinate (intermediate) CA certificate
+    SignCsr {
+        #[arg(long = "ca")]
+        ca: Option<String>,
+
+        /// Path to the CSR (PEM or DER)
+        #[arg(long)]
+        csr: PathBuf,
+
+        /// Output path for the signed certificate (PEM)
+        #[arg(long)]
+        out: PathBuf,
+
+        /// Validity in days (clamped to the issuing CA's expiry)
+        #[arg(long, default_value_t = 3650)]
+        days: u32,
+
+        /// BasicConstraints pathLenConstraint (0 = may only issue end-entity certs)
+        #[arg(long = "path-len", default_value_t = 0)]
+        path_len: u8,
     },
 
     /// External subcommand handler for `pkm ca <name> ...`

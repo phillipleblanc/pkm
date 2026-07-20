@@ -7,14 +7,17 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::{Duration, SystemTime};
 
 use clap::Parser;
 use const_oid::db::rfc5280::{ID_KP_CLIENT_AUTH, ID_KP_SERVER_AUTH};
 use const_oid::AssociatedOid;
-use der::Decode;
+use der::{Decode, DecodePem, Encode};
 use rand_core::{OsRng, RngCore};
 use x509_cert::ext::pkix::{ExtendedKeyUsage, SubjectAltName};
 use x509_cert::ext::pkix::name::GeneralName;
+use x509_cert::request::CertReq;
+use x509_cert::time::Validity;
 use x509_cert::Certificate;
 use yubihsm::{object, Client};
 
@@ -146,6 +149,16 @@ fn handle_ca(cmd: CaCommand) -> Result<(), AppError> {
         CaCommand::Export { ca } => {
             let ca_short_name = resolve_ca_short_name(ca)?;
             ca_export(&ca_short_name)
+        }
+        CaCommand::SignCsr {
+            ca,
+            csr,
+            out,
+            days,
+            path_len,
+        } => {
+            let ca_short_name = resolve_ca_short_name(ca)?;
+            ca_sign_csr(&ca_short_name, &csr, &out, days, path_len)
         }
         CaCommand::External(args) => ca_external(args),
     }
@@ -376,6 +389,110 @@ fn ca_export(ca_short_name: &str) -> Result<(), AppError> {
         output_path.display()
     );
     Ok(())
+}
+
+/// Sign a CSR as a subordinate CA certificate with an HSM-backed issuing CA.
+/// The CSR self-signature is verified before signing. Only ECDSA P-256 /
+/// SHA-256 CSRs are supported (that's what our tooling generates).
+fn ca_sign_csr(
+    ca_short_name: &str,
+    csr_path: &Path,
+    out_path: &Path,
+    days: u32,
+    path_len: u8,
+) -> Result<(), AppError> {
+    // Read and verify the CSR before touching the HSM so malformed or
+    // unsupported CSRs fail fast.
+    let csr_bytes = fs::read(csr_path)?;
+    let csr = if csr_bytes.starts_with(b"-----BEGIN") {
+        CertReq::from_pem(&csr_bytes)?
+    } else {
+        CertReq::from_der(&csr_bytes)?
+    };
+
+    verify_csr_p256(&csr)?;
+
+    let config = config::load_config()?;
+    let password = config.keyring_entry()?.get_password()?;
+    let client = hsm::connect_usb(&config, &password)?;
+
+    let ca_dir = store::ca::ca_dir(&paths::data_dir()?, ca_short_name);
+    let ca_config = store::ca::read_ca_config(&store::ca::ca_config_path(&ca_dir))?;
+    let ca_cert = store::ca::read_ca_cert(&store::ca::ca_cert_path(&ca_dir))?;
+    let ca_key_info = hsm::get_key_info(&client, ca_config.hsm.key_id)?;
+
+    // Clamp validity to the issuing CA's expiry — a subordinate must not
+    // outlive its issuer.
+    let now = SystemTime::now();
+    let not_before = now - Duration::from_secs(300);
+    let requested_after = now + Duration::from_secs(u64::from(days) * 24 * 60 * 60);
+    let issuer_after = ca_cert
+        .tbs_certificate
+        .validity
+        .not_after
+        .to_system_time();
+    let not_after = requested_after.min(issuer_after);
+    if not_after < requested_after {
+        eprintln!(
+            "warning: requested validity exceeds issuing CA expiry; clamped to {}",
+            store::ca::format_time(&ca_cert.tbs_certificate.validity.not_after)?
+        );
+    }
+    let validity = Validity {
+        not_before: pki::time_from_system_time(not_before)?,
+        not_after: pki::time_from_system_time(not_after)?,
+    };
+
+    let serial = pki::random_serial()?;
+    let signature_alg = pki::signature_algorithm_identifier(ca_key_info.algorithm)?;
+
+    let cert = pki::build_ca_from_csr(
+        csr.info.subject.clone(),
+        ca_cert.tbs_certificate.subject.clone(),
+        serial,
+        validity,
+        csr.info.public_key.clone(),
+        ca_cert.tbs_certificate.subject_public_key_info.clone(),
+        path_len,
+        signature_alg,
+        |tbs| hsm::sign_ecdsa_der(&client, ca_config.hsm.key_id, ca_key_info.algorithm, tbs),
+    )?;
+
+    pki::write_cert_pem(out_path, &cert)?;
+
+    println!(
+        "signed subordinate CA '{}' issued by {}",
+        csr.info.subject, ca_short_name
+    );
+    println!("wrote {}", out_path.display());
+    Ok(())
+}
+
+/// Verify a CSR's self-signature. Only ecdsa-with-SHA256 over a P-256 key is
+/// supported — enough for our own tooling, and catches malformed/tampered CSRs
+/// before we sign them with the HSM.
+fn verify_csr_p256(csr: &CertReq) -> Result<(), AppError> {
+    use p256::ecdsa::signature::Verifier;
+    use p256::ecdsa::{Signature, VerifyingKey};
+    use p256::pkcs8::DecodePublicKey;
+
+    const ECDSA_WITH_SHA256: &str = "1.2.840.10045.4.3.2";
+    if csr.algorithm.oid.to_string() != ECDSA_WITH_SHA256 {
+        return Err(AppError::Usage(format!(
+            "unsupported CSR signature algorithm {}; only ecdsa-with-SHA256 (P-256) is supported",
+            csr.algorithm.oid
+        )));
+    }
+
+    let spki_der = csr.info.public_key.to_der()?;
+    let verifying_key = VerifyingKey::from_public_key_der(&spki_der)
+        .map_err(|_| AppError::Usage("CSR public key is not a valid P-256 key".to_string()))?;
+    let signature = Signature::from_der(csr.signature.raw_bytes())
+        .map_err(|_| AppError::Usage("CSR signature is not valid DER".to_string()))?;
+    let info_der = csr.info.to_der()?;
+    verifying_key
+        .verify(&info_der, &signature)
+        .map_err(|_| AppError::Usage("CSR self-signature verification failed".to_string()))
 }
 
 fn ca_set_default(ca_short_name: &str) -> Result<(), AppError> {

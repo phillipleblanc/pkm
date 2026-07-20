@@ -17,11 +17,27 @@ use crate::app::error::AppError;
 
 pub use pem::{private_key_pem_bytes, write_cert_pem};
 pub use wrapped::{is_wrapped_key, read_wrapped_key_bytes, write_wrapped_key};
-pub use x509::{build_leaf_cert, build_root_ca};
+pub use x509::{build_ca_from_csr, build_leaf_cert, build_root_ca};
 
 pub fn name_from_cn_ou(common_name: &str, organizational_unit: &str) -> Result<Name, AppError> {
     let subject = format!("CN={},OU={}", common_name, organizational_unit);
     Ok(subject.parse()?)
+}
+
+/// Convert a SystemTime to an X.509 Time, using UTCTime for years <= 2049 as
+/// required by RFC 5280 (x509-cert's `Time::try_from(SystemTime)` always emits
+/// GeneralizedTime, which strict verifiers reject for pre-2050 dates).
+pub fn time_from_system_time(t: SystemTime) -> Result<Time, AppError> {
+    let dt = time::OffsetDateTime::from(t);
+    if dt.year() <= i32::from(der::asn1::UtcTime::MAX_YEAR) {
+        let unix = t
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| AppError::X509(e.to_string()))?;
+        let date_time = der::DateTime::from_unix_duration(unix)?;
+        Ok(Time::UtcTime(der::asn1::UtcTime::from_date_time(date_time)?))
+    } else {
+        Ok(Time::GeneralTime(der::asn1::GeneralizedTime::try_from(t)?))
+    }
 }
 
 pub fn validity_from_now_days(days: u32, skew: bool) -> Result<Validity, AppError> {
@@ -34,8 +50,8 @@ pub fn validity_from_now_days(days: u32, skew: bool) -> Result<Validity, AppErro
     let not_after = now + Duration::from_secs(days as u64 * 24 * 60 * 60);
 
     Ok(Validity {
-        not_before: Time::try_from(not_before)?,
-        not_after: Time::try_from(not_after)?,
+        not_before: time_from_system_time(not_before)?,
+        not_after: time_from_system_time(not_after)?,
     })
 }
 

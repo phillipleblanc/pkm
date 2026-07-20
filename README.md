@@ -61,6 +61,27 @@ pkm tls export server1 --format split
 pkm tls list
 ```
 
+## Subordinate (intermediate) CAs
+
+`pkm ca sign-csr` signs an external CSR with an HSM-backed CA, producing a
+subordinate CA certificate. The CSR self-signature is verified before signing;
+only ECDSA P-256 / SHA-256 CSRs are accepted. Requested validity is clamped to
+the issuing CA's expiry.
+
+```bash
+# Generate the subordinate key + CSR (key stays wherever you generate it)
+openssl ecparam -genkey -name prime256v1 -noout -out subca.key
+openssl req -new -key subca.key -out subca.csr \
+  -subj "/OU=YubiHSM2/CN=My Issuing CA"
+
+# Sign it with the HSM-backed root (pathLenConstraint defaults to 0:
+# the subordinate may only issue end-entity certificates)
+pkm ca sign-csr --ca home --csr subca.csr --out subca.crt
+
+# Longer chain of intermediates, if ever needed:
+pkm ca sign-csr --ca home --csr subca.csr --out subca.crt --path-len 1
+```
+
 ## Configuration
 
 Config lives at `$XDG_CONFIG_HOME/pkm/config.toml` (fallback `~/.config/pkm/config.toml`).
